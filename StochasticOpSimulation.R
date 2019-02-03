@@ -242,10 +242,10 @@ d <- nrow(utilityData)
 metricDesiredDirections <- "up-up-down" #preferred metric directions for metric 1, 2, 3
 
 ########################### Running the Optimization per each cohort ##########################
-outputPath <- Sys.getenv("HOME")
+outputPath <- #Sys.getenv("HOME")
 constriantIdx <- 1 # one of the important constraints that will be visualized in the result plot
 constriantDirection <- "up"
-
+numCores <- detectCores()
 # Extract the utility data (both point estimates and variances)
 metricDesiredDirectionsList <- strsplit(metricDesiredDirections, "-")
 muU <- processUtility(3, utilityData, 1) * processUtility(3, utilityData, 3)
@@ -268,29 +268,36 @@ for (i in 4 : ncol(utilityData)) {
 
 taus <- c(0.001) #constraints violation level
 alphas <- c(0.01)
-numCores <- detectCores()
 for (tau in taus){
   for (alpha in alphas){
+    results <- list()
+    registerDoParallel(numCores)
+    #Parallelly run the stochastic optimizations
+    results <- foreach (j=1:10, .combine = "c") %dopar% {
+     csa.solveFull(muU, sigmaU, muVList, sigmaVList, d, N, l, m, tau, alpha, J)
+    }
+    #stop parallel runs
+    registerDoSEQ()
+
     csaSGDList <- list()
     csaAdagradList <-list()
     fxSGDList <- list()
     fxAdagradList <- list()
     fxSGDConstraintList <- list()
     fxAdagradConstraintList <- list()
+    cnt <- 1
+    for (i in seq(1, 20, by =2)){
+      csaSGD <- results[[i]]
+      csaAdagrad <- results[[i+1]]
+      csaSGDList[[cnt]] <- csaSGD
+      csaAdagradList[[cnt]] <- csaAdagrad
 
-    foreach (i=1:10) %dopar% {
-      results <- csa.solveFull(muU, sigmaU, muVList, sigmaVList, d, N, l, m, tau, alpha, J)
-      csaSGD <- results[[1]]
-      csaAdagrad <- results[[2]]
-      csaSGDList[[i]] <- csaSGD
-      csaAdagradList[[i]] <- csaAdagrad
-
-      fxSGDList[[i]] <- unlist(lapply(csaSGD[[2]], function(x) { x %*% muU}))
-      fxSGDConstraintList[[i]] <- unlist(lapply(csaSGD[[2]], function(x) { x %*% muVList[[constriantIdx]]}))
-      fxAdagradList[[i]] <- unlist(lapply(csaAdagrad[[2]], function(x) { x %*% muU}))
-      fxAdagradConstraintList[[i]] <- unlist(lapply(csaAdagrad[[2]], function(x) { x %*%  muVList[[constriantIdx]]}))
+      fxSGDList[[cnt]] <- unlist(lapply(csaSGD[[2]], function(x) { x %*% muU}))
+      fxSGDConstraintList[[cnt]] <- unlist(lapply(csaSGD[[2]], function(x) { x %*% muVList[[constriantIdx]]}))
+      fxAdagradList[[cnt]] <- unlist(lapply(csaAdagrad[[2]], function(x) { x %*% muU}))
+      fxAdagradConstraintList[[cnt]] <- unlist(lapply(csaAdagrad[[2]], function(x) { x %*%  muVList[[constriantIdx]]}))
+      cnt <- cnt + 1
     }
-
     #extract summary stats for the results
     fxSGDMean <- summarizeResults(fxSGDList)[[1]]
     fxSGDStd <- summarizeResults(fxSGDList)[[2]]
@@ -310,6 +317,5 @@ for (tau in taus){
 
     output <- paste0(outputPath, "/ObjVsOneConstraintPlot", tau, "-", alpha, ".pdf")
     plotResults(output, constriantDirection, fxSGDMean, fxAdagradMean, fxSGDStd, fxAdagradStd, fxSGDConstraintMean, fxAdagradConstraintMean, fxSGDConstraintStd, fxAdagradConstraintStd)
-
     }
 }
