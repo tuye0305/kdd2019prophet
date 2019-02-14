@@ -1,15 +1,8 @@
 The simulation scripts are based on the method proposed in our paper "Personalization and Optimization of Decision Parameters via Heterogenous Causal Effects" (link: https://arxiv.org/pdf/1901.10550.pdf)
 
-We share example scripts for merging trees and running stochastic optimization algorithms with simulation data under this repository. The
-source code contains two main files:
-(1) MergeTreeSimulation.R - This code helps us combine the
-different cohorts corresponding to each metric and each
-treatment into a single cohort definition.
-(2) StochasticOpSimulation.R - This code runs the stochastic
-optimization routine to identify the optimal parameter in
-each cohort. Running the code as is should generate the plot
-as shown in Figure 5.
-We have also used the open source R library called Causal Tree
-(https://github.com/susanathey/causalTree) to identify the cohorts
+We share example scripts for merging trees and running stochastic optimization algorithms with simulation data under this repository. The source code contains two main files:
+(1) MergeTreeSimulation.R - This code helps us combine the different cohorts corresponding to each metric and each treatment into a single cohort definition.
+(2) StochasticOpSimulation.R - This code runs the stochastic optimization routine to identify the optimal parameter in each cohort.
+We have also used the open source R library called Causal Tree (https://github.com/susanathey/causalTree) to identify the cohorts
 for each treatment j and metric k. Using these, the entire methodology discussed in this paper can be easily reproduced for any similar
 problem of interest.
