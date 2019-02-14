@@ -1,7 +1,7 @@
 The simulation scripts are based on the method proposed in our paper "Personalization and Optimization of Decision Parameters via
 Heterogenous Causal Effects" (link: https://arxiv.org/pdf/1901.10550.pdf)
 
-We share example scripts for merging trees and running stochastic optimization algorithms with simulation data in the following Github link: https://github.com/tuye0305/kdd2019prophet. The
+We share example scripts for merging trees and running stochastic optimization algorithms with simulation data under this repository. The
 source code contains two main files:
 (1) MergeTreeSimulation.R - This code helps us combine the
 different cohorts corresponding to each metric and each
