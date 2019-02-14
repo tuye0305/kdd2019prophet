@@ -17,18 +17,30 @@ library(foreach)
 library(doParallel)
 
 ########################### Helper Functions ##########################
-# evaluate k constriants E(-g(x,Vk)) <= etak and return the violated ones
 evaluateConstraints <- function(VList, xList, etaList, k, d, J, N){
-    VListSingle <- lapply(VList, function(x) { x[k,] } )
-    etaListSingle <- lapply(etaList, function(x) { x[k,] } )
+    # evaluate k constriants E(-g(x,Vk)) <= etak and return the violated ones
+    #
+    # Args:
+    #   VList: a list of values for the constraints.
+    #   xList: a list represents the probabilistic assignments of treatments.
+    #   etaList: a list of eta represent the thresholds of constraints.
+    #   k: the number of constriants.
+    #   d: dimension of x (number of treatment * number of cohorts)
+    #   J: the number of samples to be evaluated
+    #   N: the number of total iterations
+    #
+    # Returns:
+    #   A list of index and a list of values for the constraints that got violated.
+    VListSingle <- lapply(VList, function(x) { x[k,]})
+    etaListSingle <- lapply(etaList, function(x) { x[k,]})
 
-    randIdxs <- sample(1:N, J, replace=TRUE)
+    randIdxs <- sample(1 : N, J, replace = TRUE)
     violateList <- list()
     idxList <- list()
     cnt <- 1
     sumV <- rep(0) * d
     for (i in 1 : length(etaList)) {
-        muV <- colMeans(VList[[i]][randIdxs, ])
+        muV <- colMeans(VList[[i]][randIdxs,])
         if (- muV %*% xList[[k]] > etaListSingle[[i]]) {
             violateList[[cnt]] <- as.matrix(VListSingle[[i]])
             idxList[[cnt]] <- i
@@ -38,20 +50,47 @@ evaluateConstraints <- function(VList, xList, etaList, k, d, J, N){
     list(idxList, violateList)
 }
 
-addCohortLevelConstraints <- function(Amatrix, l, m){
+addCohortLevelConstraints <- function(A.matrix, l, m){
     # per each cohort add a column in matrix A
+    #
+    # Args:
+    #   A.metrix: a matrix represent the constraints
+    #   l: the number of treatments
+    #   m: the numberof cohorts
+    # Returns:
+    #   a revised A matrix.
     baseCol <- rep(0, l * m)
     for (i in 0 : (m - 1)) {
         col <- baseCol
         col[c((l * i + 1) : (l * (i + 1)))] <- 1
-        Amatrix <- rbind(Amatrix, t(col))
+        A.matrix <- rbind(A.matrix, t(col))
     }
-    Amatrix
+    A.matrix
 }
 
 
-# The code below solves Max x^tU s.t -x^Vk <= 0, 0 <= x <= 1, sum(x per cohort) = 1
-csa.solve <- function(muU, sigmaU, muVList, sigmaVList, N, k, m, gamma, etaList, alpha, s, J, type = "SGD") {
+csa.solve <- function(muU, sigmaU, muVList, sigmaVList, N, l, m, gamma, etaList, alpha, s, J, type = "SGD") {
+    # The code below solves Max x^tU s.t -x^Vk <= 0, 0 <= x <= 1, sum(x per cohort) = 1
+    #
+    # Args:
+    #   muU: the mean of objective utility for each treatment and cohort.
+    #   sigmaU: the variance of objective utility for each treatment and cohort.
+    #   muVList: a list of the mean of constraint utilities for each treatment and cohort.
+    #   sigmaVList: a list of the variance of constraint utilities for each treatment and cohort.
+    #   N: number of iterations
+    #   l: dimension of treatments
+    #   m: dimension of cohorts
+    #   gamma: initializations of the optimization.
+    #   etaList: a list of eta represent the thresholds of constraints.
+    #   alpha: hyperparameter of the learning rate.
+    #   s: the starting iteration for evaluate whether the solution satisfy the constraints.
+    #   J: the number of samples to be evaluated.
+    #   type: the choice of optimization method "SGD" or "Adagrad" (default method is "SGD")
+    # Returns:
+    #   Results of the optimization in terms of
+    # 1)final treatment assignment;
+    # 2) treatment assignments for each iteration;
+    # 3) the number of solutions that satisfy all the constraints.
     U <- mvrnorm(n = N, mu = muU, Sigma = sigmaU)
     VList <- list()
     for (i in 1 : length(sigmaVList)) {
@@ -112,10 +151,25 @@ csa.solve <- function(muU, sigmaU, muVList, sigmaVList, N, k, m, gamma, etaList,
     return(list(xFinal, xList, count))
 }
 
-# solve for the parameter assignments (Max x^tU s.t x^Vk >= 0, 0 <= x <= 1, sum(x) = 1)
-csa.solveFull <- function(muU, sigmaU, muVList, sigmaVList, d, N, l, m, tau, alpha, J){
+csa.solveFull <- function(muU, sigmaU, muVList, sigmaVList, N, l, m, tau, alpha, J){
+    # solve for the parameter assignments (Max x^tU s.t x^Vk >= 0, 0 <= x <= 1, sum(x) = 1)
+    #
+    # Args:
+    #   muU: the mean of objective utility for each treatment and cohort.
+    #   sigmaU: the variance of objective utility for each treatment and cohort.
+    #   muVList: a list of the mean of constraint utilities for each treatment and cohort.
+    #   sigmaVList: a list of the variance of constraint utilities for each treatment and cohort.
+    #   N: number of iterations.
+    #   l: dimension of treatments.
+    #   m: dimension of cohorts.
+    #   tau: hyperparameter for constraints violation level.
+    #   alpha: hyperparameter of the learning rate.
+    #   J: the number of samples to be evaluated.
+    # Returns:
+    #   the optimization solutions with SGD and Adagrad options.
     alpha <- 1
     s <- N / 2
+    d <- l * m
 
     Dx <- sqrt(d) / alpha
     MF <- sqrt(sum(diag(sigmaU)) + sum(muU ^ 2))
@@ -135,10 +189,23 @@ csa.solveFull <- function(muU, sigmaU, muVList, sigmaVList, d, N, l, m, tau, alp
     list(csaSGD, csaAdagrad)
 }
 
-trim <- function (x) gsub("^\\s+|\\s+$", "", x)
+trim <- function (x){
+    # trim a string to remove white spaces
+    # Args: x: the raw string.
+    #
+    # Returns:
+    #   a trimmed string.
+    gsub("^\\s+|\\s+$", "", x)
+}
 
-# process the utility input data (mean pm error margin) and extract the mean & error margin information
 processUtility <- function(colIdx, data, idx){
+    # process the utility input data (mean pm error margin) and extract the mean & error margin information
+    # Args:
+    #   colIdx: column index of the utility in the dataframe.
+    #   data: the dataframe with all utility information.
+    #   idx: the index of the item within the column.
+    # Returns:
+    #   A matrix form of the processed utilities.
     utility <- c()
     for (i in 1 : length(data[, colIdx])) {
         utility[[i]] <- as.numeric(trim(strsplit(data[, colIdx][[i]], ";")[[1]][idx]))
@@ -146,105 +213,141 @@ processUtility <- function(colIdx, data, idx){
     as.matrix(utility)
 }
 
-# write details of the QP solutions in json format
 writeDetails <- function(outputPath, result, muU, muVList, tau, alpha, metricDesiredDirectionsList, fileName) {
-  detailResults <- list()
-  detailResults[[1]] <- paste0("Objective Value: ", result[[1]] %*% muU)
-  cnt <- 2
-  for (i in 1 : length(muVList)) {
-    metricDirection <- metricDesiredDirectionsList[[1]][i + 1]
-    if (metricDirection == "up")
-      detailResults[[cnt]] <- paste0("Constraint: ", result[[1]] %*% muVList[[i]])
-    else detailResults[[cnt]] <- paste0("Constraint: ", - result[[1]] %*% muVList[[i]])
-    cnt <- cnt + 1
-  }
-  detailResults[[cnt]] <- paste0("Chosen Output: ")
-  detailResults[[cnt + 1]] <- result[[1]]
-  detailResults[[cnt + 2]] <- paste0(" count:", result[[3]])
-  jsonResults <- toJSON(detailResults, auto_unbox = TRUE)
-  write(prettify(jsonResults), file = paste0(outputPath, '/', fileName, tau, "-", alpha))
+    # write details of the QP solutions in json format
+    # Args:
+    #   outputPath: the path of output directory.
+    #   result: the result of solved treatment assignments from the optimization.
+    #   muU: the mean of objective utility for each treatment and cohort.
+    #   muVList: a list of the mean of constraint utilities for each treatment and cohort.
+    #   tau: hyperparameter for constraints violation level.
+    #   alpha: hyperparameter of the learning rate.
+    #   metricDesiredDirectionsList: a list of the desired direction of metrics of interets
+    #   fileName: the file name for the output.
+    # Returns:
+    # NULL
+    detailResults <- list()
+    detailResults[[1]] <- paste0("Objective Value: ", result[[1]] %*% muU)
+    cnt <- 2
+    for (i in 1 : length(muVList)) {
+        metricDirection <- metricDesiredDirectionsList[[1]][i + 1]
+        if (metricDirection == "up")
+            detailResults[[cnt]] <- paste0("Constraint: ", result[[1]] %*% muVList[[i]])
+        else detailResults[[cnt]] <- paste0("Constraint: ", - result[[1]] %*% muVList[[i]])
+        cnt <- cnt + 1
+    }
+    detailResults[[cnt]] <- paste0("Chosen Output: ")
+    detailResults[[cnt + 1]] <- result[[1]]
+    detailResults[[cnt + 2]] <- paste0(" count:", result[[3]])
+    jsonResults <- toJSON(detailResults, auto_unbox = TRUE)
+    write(prettify(jsonResults), file = paste0(outputPath, '/', fileName, tau, "-", alpha))
 }
 
-# plotting the Expectation of effect on objective metric along with the increasing iterations
-plotResults <- function(output, constriantDirection, fxSGDMean, fxAdagradMean, fxSGDStd, fxAdagradStd, fxSGDConstraintMean, fxAdagradConstraintMean, fxSGDConstraintStd, fxAdagradConstraintStd){
-  x <- c(1: length(fxSGDMean))
-  if (constriantDirection == "down"){
-    fxAdagradConstraintMean = - fxAdagradConstraintMean
-  }
+plotResults <- function(output, constraintDirection, fxSGDMean, fxAdagradMean, fxSGDStd, fxAdagradStd, fxSGDConstraintMean, fxAdagradConstraintMean, fxSGDConstraintStd, fxAdagradConstraintStd){
+    # plotting the Expectation of effect on objective metric along with the increasing iterations
+    # Args:
+    #   output: the path of the output.
+    #   constraintDirection: the desired direction of the constraint.
+    #   fxSGDMean: the mean of F(x,U) on the objective utility given the SGD solution.
+    #   fxAdagradMean: the mean of F(x,U) on the objective utility given the Adagrad solution.
+    #   fxSGDStd: the standard deviation of F(x,U) on the objective utility given the SGD solution.
+    #   fxAdagradStd: the standard deviation of F(x,U) on the objective utility  given the Adagrad solution.
+    #   fxSGDConstraintMean: the mean of F(x,V) on the constriant utility given the SGD solution.
+    #   fxAdagradConstraintMean: the mean of F(x,V) on the constriant utility given the Adagrad solution.
+    #   fxSGDConstraintStd: the standard deviation of F(x,V) on the constriant utility given the SGD solution.
+    #   fxAdagradConstraintStd: the standard deviation of F(x,V) on the constriant utility given the Adagrad solution.
+    # Returns:
+    #   NULL
+    x <- c(1 : length(fxSGDMean))
+    if (constraintDirection == "down") {
+        fxAdagradConstraintMean = - fxAdagradConstraintMean
+    }
 
-  plt <- ggplot() +
-    geom_line(aes(x, fxSGDMean, colour="SGD Objective"), size = 1.5) +
-    geom_line(aes(x, fxAdagradMean, colour="Adagrad Objective"), size = 1.5) +
-    geom_ribbon(aes(x, ymin=fxSGDMean - fxSGDStd,ymax=fxSGDMean + fxSGDStd), fill = "#C77CFF",alpha=0.3) +
-    geom_ribbon(aes(x, ymin=fxAdagradMean - fxAdagradStd,ymax=fxAdagradMean + fxAdagradStd), fill = "#7CAE00",alpha=0.3) +
-    geom_line(aes(x, fxSGDConstraintMean, colour="SGD Constraint"), size = 1.5) +
-    geom_line(aes(x, fxAdagradConstraintMean, colour="Adagrad Constraint"), size = 1.5) +
-    geom_ribbon(aes(x, ymin=fxSGDConstraintMean - fxSGDConstraintStd,ymax=fxSGDConstraintMean + fxSGDConstraintStd), fill = "#00BFC4",alpha=0.3) +
-    geom_ribbon(aes(x, ymin=fxAdagradConstraintMean - fxAdagradConstraintStd,ymax=fxAdagradConstraintMean + fxAdagradConstraintStd), fill = "#F8766D",alpha=0.3) +
-    xlab("Iterations") + ylab("Estimations of Effects") +
-    theme(text = element_text(size=40),
-          axis.text.x = element_text(size = 20),
-          legend.title = element_blank(),
-          legend.text=element_text(size=20),
-          legend.position = c(0.7, 0.4),
-          legend.key.size = unit(4, 'lines'),
-          axis.text.y=element_blank(), axis.ticks.y=element_blank())
-  ggsave(output, plot = plt, width = 9, height = 7.5)
+    plt <- ggplot() +
+        geom_line(aes(x, fxSGDMean, colour = "SGD Objective"), size = 1.5) +
+        geom_line(aes(x, fxAdagradMean, colour = "Adagrad Objective"), size = 1.5) +
+        geom_ribbon(aes(x, ymin = fxSGDMean - fxSGDStd, ymax = fxSGDMean + fxSGDStd), fill = "#C77CFF", alpha = 0.3) +
+        geom_ribbon(aes(x, ymin = fxAdagradMean - fxAdagradStd, ymax = fxAdagradMean + fxAdagradStd), fill = "#7CAE00", alpha = 0.3) +
+        geom_line(aes(x, fxSGDConstraintMean, colour = "SGD Constraint"), size = 1.5) +
+        geom_line(aes(x, fxAdagradConstraintMean, colour = "Adagrad Constraint"), size = 1.5) +
+        geom_ribbon(aes(x, ymin = fxSGDConstraintMean - fxSGDConstraintStd, ymax = fxSGDConstraintMean + fxSGDConstraintStd), fill = "#00BFC4", alpha = 0.3) +
+        geom_ribbon(aes(x, ymin = fxAdagradConstraintMean - fxAdagradConstraintStd, ymax = fxAdagradConstraintMean + fxAdagradConstraintStd), fill = "#F8766D", alpha = 0.3) +
+        xlab("Iterations") +
+        ylab("Estimations of Effects") +
+        theme(text = element_text(size = 40),
+        axis.text.x = element_text(size = 20),
+        legend.title = element_blank(),
+        legend.text = element_text(size = 20),
+        legend.position = c(0.7, 0.4),
+        legend.key.size = unit(4, 'lines'),
+        axis.text.y = element_blank(), axis.ticks.y = element_blank())
+    ggsave(output, plot = plt, width = 9, height = 7.5)
 }
 
 
 randPercent <- function(N, M) {
-  vec <- abs(rnorm(N))
-  vec / sum(vec) * M
+    # generate a list of N percentages that will sum up to a fixed values M
+    # Args:
+    #   N: the number of values in the output
+    #   M: the number of the sum of the output values
+    # Returns:
+    #   A list of numeric values
+    vec <- abs(rnorm(N))
+    vec / sum(vec) * M
 }
 
-# process the results (list format) and calculate the mean and standard deviations and output the summary stats
 summarizeResults <- function(resultList) {
-  colSize = length(resultList)
-  rowSize = length(resultList[[1]])
-  resultMatrix <- matrix(unlist(resultList), ncol = colSize, nrow = rowSize)
-  resultMean <- rowMeans(resultMatrix)
-  resultStd <-  unlist(apply(resultMatrix, 1, function(x) { sd(x) }))
-  list(resultMean, resultStd)
+    # process the results (list format) and calculate the mean and standard deviations and output the summary stats
+    # Args:
+    #   resultList: A list of results
+    #
+    # Returns:
+    #   A list with the mean and standard deviation of the results
+    colSize = length(resultList)
+    rowSize = length(resultList[[1]])
+    resultMatrix <- matrix(unlist(resultList), ncol = colSize, nrow = rowSize)
+    resultMean <- rowMeans(resultMatrix)
+    resultStd <- unlist(apply(resultMatrix, 1, function(x) { sd(x)}))
+    list(resultMean, resultStd)
 }
 
 ########################### Preparing Simulation Input Data ##########################
-l <- 10 # dimention of treatments
+l <- 10 # dimension of treatments
 N <- 200 #iters
 J <- 50 #number of samples used for evaluate the constraints
-m <- 3 # dimention of cohorts
+m <- 3 # dimension of cohorts
 
 set.seed(5)
-cohorts <- rep(unlist(lapply(1:m, function(x) {paste("Cohort: ", x)})), l)
-treatments <- rep(unlist(lapply(1:l, function(x) {paste("Treatment: ", x)})), m)
+cohorts <- rep(unlist(lapply(1 : m, function(x) {paste("Cohort: ", x)})), l)
+treatments <- rep(unlist(lapply(1 : l, function(x) {paste("Treatment: ", x)})), m)
 
 #Assume the input data has the mean, standard deviation of the effects, followed by the sample size % for each cohort
-metric1 <- unlist(mapply(function(x, y, z) {paste(x, ";", y, ";", z)},
-                         rnorm(l*m), abs(rnorm(l*m)), rep(randPercent(m , 1), l)))
-metric2 <- unlist(mapply(function(x, y, z) {paste(x, ";", y, ";", z)},
-                         rnorm(l*m), abs(rnorm(l*m)), rep(randPercent(m , 1), l)))
-metric3 <- unlist(mapply(function(x, y, z) {paste(x, ";", y, ";", z)},
-                         rnorm(l*m), abs(rnorm(l*m)), rep(randPercent(m , 1), l)))
+metric.1 <- unlist(mapply(function(x, y, z) {paste(x, ";", y, ";", z)},
+rnorm(l * m), abs(rnorm(l * m)), rep(randPercent(m , 1), l)))
+metric.2 <- unlist(mapply(function(x, y, z) {paste(x, ";", y, ";", z)},
+rnorm(l * m), abs(rnorm(l * m)), rep(randPercent(m , 1), l)))
+metric.3 <- unlist(mapply(function(x, y, z) {paste(x, ";", y, ";", z)},
+rnorm(l * m), abs(rnorm(l * m)), rep(randPercent(m , 1), l)))
 utilityData <- data.frame(
-    "cohort" = cohorts,
-    "treatment" = treatments,
-    "metric1" = metric1,
-    "metric2" = metric2,
-    "metric3" = metric3
-  )
-utilityData$metric1 <- as.character(utilityData$metric1)
-utilityData$metric2 <- as.character(utilityData$metric2)
-utilityData$metric3 <- as.character(utilityData$metric3)
+"cohort" = cohorts,
+"treatment" = treatments,
+"metric.1" = metric.1,
+"metric.2" = metric.2,
+"metric.3" = metric.3
+)
+utilityData$metric.1 <- as.character(utilityData$metric.1)
+utilityData$metric.2 <- as.character(utilityData$metric.2)
+utilityData$metric.3 <- as.character(utilityData$metric.3)
 
-utilityData<- utilityData[order(utilityData$cohort, utilityData$treatment),]
+utilityData <- utilityData[order(utilityData$cohort, utilityData$treatment),]
 d <- nrow(utilityData)
 
 metricDesiredDirections <- "up-up-down" #preferred metric directions for metric 1, 2, 3
 
 ########################### Running the Optimization per each cohort ##########################
-outputPath <- #Sys.getenv("HOME")
-constriantIdx <- 1 # one of the important constraints that will be visualized in the result plot
-constriantDirection <- "up"
+outputPath <- Sys.getenv("HOME") #TODO: Please change the output location before running the simulation code.
+constraintIdx <- 1 # one of the important constraints that will be visualized in the result plot
+constraintDirection <- "up"
 numCores <- detectCores()
 # Extract the utility data (both point estimates and variances)
 metricDesiredDirectionsList <- strsplit(metricDesiredDirections, "-")
@@ -256,66 +359,66 @@ muVList <- list()
 sigmaVList <- list()
 
 for (i in 4 : ncol(utilityData)) {
-  cnt <- i - 3
-  metricDirection <- metricDesiredDirectionsList[[1]][cnt + 1]
-  if (metricDirection == "up")
-    muVList[[cnt]] <- processUtility(i, utilityData, 1) *  processUtility(i, utilityData, 3)
-  else if (metricDirection == "down")
-    muVList[[cnt]] <- - processUtility(i, utilityData, 1) *  processUtility(i, utilityData, 3)
-  sigmaV <- processUtility(i, utilityData, 2) * processUtility(i, utilityData, 3) ^ 2
-  sigmaVList[[cnt]] <- diag(as.list(sigmaV))
+    cnt <- i - 3
+    metricDirection <- metricDesiredDirectionsList[[1]][cnt + 1]
+    if (metricDirection == "up")
+        muVList[[cnt]] <- processUtility(i, utilityData, 1) * processUtility(i, utilityData, 3)
+    else if (metricDirection == "down")
+        muVList[[cnt]] <- - processUtility(i, utilityData, 1) * processUtility(i, utilityData, 3)
+    sigmaV <- processUtility(i, utilityData, 2) * processUtility(i, utilityData, 3) ^ 2
+    sigmaVList[[cnt]] <- diag(as.list(sigmaV))
 }
 
-taus <- c(0.001) #constraints violation level
-alphas <- c(0.01)
-for (tau in taus){
-  for (alpha in alphas){
-    results <- list()
-    registerDoParallel(numCores)
-    #Parallelly run the stochastic optimizations
-    results <- foreach (j=1:10, .combine = "c") %dopar% {
-     csa.solveFull(muU, sigmaU, muVList, sigmaVList, d, N, l, m, tau, alpha, J)
-    }
-    #stop parallel runs
-    registerDoSEQ()
+taus <- c(0.001) # hyperparameter for constraints violation level
+alphas <- c(0.01) # hyperparameter of the learning rate
+for (tau in taus) {
+    for (alpha in alphas) {
+        results <- list()
+        registerDoParallel(numCores)
+        # Parallelly run the stochastic optimizations
+        results <- foreach (j = 1 : 10, .combine = "c") %dopar% {
+            csa.solveFull(muU, sigmaU, muVList, sigmaVList, N, l, m, tau, alpha, J)
+        }
+        #stop parallel runs
+        registerDoSEQ()
 
-    csaSGDList <- list()
-    csaAdagradList <-list()
-    fxSGDList <- list()
-    fxAdagradList <- list()
-    fxSGDConstraintList <- list()
-    fxAdagradConstraintList <- list()
-    cnt <- 1
-    for (i in seq(1, 20, by =2)){
-      csaSGD <- results[[i]]
-      csaAdagrad <- results[[i+1]]
-      csaSGDList[[cnt]] <- csaSGD
-      csaAdagradList[[cnt]] <- csaAdagrad
+        csaSGDList <- list()
+        csaAdagradList <- list()
+        fxSGDList <- list()
+        fxAdagradList <- list()
+        fxSGDConstraintList <- list()
+        fxAdagradConstraintList <- list()
+        cnt <- 1
+        for (i in seq(1, 20, by = 2)) {
+            csaSGD <- results[[i]]
+            csaAdagrad <- results[[i + 1]]
+            csaSGDList[[cnt]] <- csaSGD
+            csaAdagradList[[cnt]] <- csaAdagrad
 
-      fxSGDList[[cnt]] <- unlist(lapply(csaSGD[[2]], function(x) { x %*% muU}))
-      fxSGDConstraintList[[cnt]] <- unlist(lapply(csaSGD[[2]], function(x) { x %*% muVList[[constriantIdx]]}))
-      fxAdagradList[[cnt]] <- unlist(lapply(csaAdagrad[[2]], function(x) { x %*% muU}))
-      fxAdagradConstraintList[[cnt]] <- unlist(lapply(csaAdagrad[[2]], function(x) { x %*%  muVList[[constriantIdx]]}))
-      cnt <- cnt + 1
-    }
-    #extract summary stats for the results
-    fxSGDMean <- summarizeResults(fxSGDList)[[1]]
-    fxSGDStd <- summarizeResults(fxSGDList)[[2]]
-    fxAdagradMean <- summarizeResults(fxAdagradList)[[1]]
-    fxAdagradStd <- summarizeResults(fxAdagradList)[[2]]
+            fxSGDList[[cnt]] <- unlist(lapply(csaSGD[[2]], function(x) { x %*% muU}))
+            fxSGDConstraintList[[cnt]] <- unlist(lapply(csaSGD[[2]], function(x) { x %*% muVList[[constraintIdx]]}))
+            fxAdagradList[[cnt]] <- unlist(lapply(csaAdagrad[[2]], function(x) { x %*% muU}))
+            fxAdagradConstraintList[[cnt]] <- unlist(lapply(csaAdagrad[[2]], function(x) { x %*% muVList[[constraintIdx]]}))
+            cnt <- cnt + 1
+        }
+        #extract summary stats for the results
+        fxSGDMean <- summarizeResults(fxSGDList)[[1]]
+        fxSGDStd <- summarizeResults(fxSGDList)[[2]]
+        fxAdagradMean <- summarizeResults(fxAdagradList)[[1]]
+        fxAdagradStd <- summarizeResults(fxAdagradList)[[2]]
 
-    fxSGDConstraintMean <- summarizeResults(fxSGDConstraintList)[[1]]
-    fxSGDConstraintStd <- summarizeResults(fxSGDConstraintList)[[2]]
-    fxAdagradConstraintMean <- summarizeResults(fxAdagradConstraintList)[[1]]
-    fxAdagradConstraintStd <- summarizeResults(fxAdagradConstraintList)[[2]]
+        fxSGDConstraintMean <- summarizeResults(fxSGDConstraintList)[[1]]
+        fxSGDConstraintStd <- summarizeResults(fxSGDConstraintList)[[2]]
+        fxAdagradConstraintMean <- summarizeResults(fxAdagradConstraintList)[[1]]
+        fxAdagradConstraintStd <- summarizeResults(fxAdagradConstraintList)[[2]]
 
-    #save all the outputs into files
-    resultDF <- data.frame("cohort" = utilityData$cohort, "treatment" = utilityData$treatment,"SGD" = csaSGD[[1]], "Adagrad" = csaAdagrad[[1]])
-    writeDetails(outputPath, csaSGD, muU, muVList, tau, alpha, metricDesiredDirectionsList, "SGDDetails")
-    writeDetails(outputPath, csaAdagrad, muU, muVList, tau, alpha, metricDesiredDirectionsList, "AdagradDetails")
-    write.csv(resultDF, file = paste0(outputPath, '/FinalAssignments', tau, "-", alpha, '.csv'), row.names = FALSE, quote = FALSE)
+        #save all the outputs into files
+        resultDF <- data.frame("cohort" = utilityData$cohort, "treatment" = utilityData$treatment, "SGD" = csaSGD[[1]], "Adagrad" = csaAdagrad[[1]])
+        writeDetails(outputPath, csaSGD, muU, muVList, tau, alpha, metricDesiredDirectionsList, "SGDDetails")
+        writeDetails(outputPath, csaAdagrad, muU, muVList, tau, alpha, metricDesiredDirectionsList, "AdagradDetails")
+        write.csv(resultDF, file = paste0(outputPath, '/FinalAssignments', tau, "-", alpha, '.csv'), row.names = FALSE, quote = FALSE)
 
-    output <- paste0(outputPath, "/ObjVsOneConstraintPlot", tau, "-", alpha, ".pdf")
-    plotResults(output, constriantDirection, fxSGDMean, fxAdagradMean, fxSGDStd, fxAdagradStd, fxSGDConstraintMean, fxAdagradConstraintMean, fxSGDConstraintStd, fxAdagradConstraintStd)
+        output <- paste0(outputPath, "/ObjVsOneConstraintPlot", tau, "-", alpha, ".pdf")
+        plotResults(output, constraintDirection, fxSGDMean, fxAdagradMean, fxSGDStd, fxAdagradStd, fxSGDConstraintMean, fxAdagradConstraintMean, fxSGDConstraintStd, fxAdagradConstraintStd)
     }
 }
